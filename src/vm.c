@@ -20,6 +20,7 @@
 #include <mruby/throw.h>
 #include <mruby/dump.h>
 #include <mruby/presym.h>
+#include <sys/time.h>
 #ifndef MRB_NO_FLOAT
 #include <math.h>
 #endif
@@ -984,7 +985,18 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const struct RProc *proc, mrb
 #ifdef MRB_USE_DEBUG_HOOK
 #define CODE_FETCH_HOOK(mrb, irep, pc, regs) if ((mrb)->code_fetch_hook) (mrb)->code_fetch_hook((mrb), (irep), (pc), (regs));
 #else
-#define CODE_FETCH_HOOK(mrb, irep, pc, regs)
+
+#define CODE_FETCH_HOOK(mrb, irep, pc, regs) \
+if(opcode_counter++ == 1000) { \
+  opcode_counter = 0; \
+  struct timeval tv; \
+  gettimeofday(&tv, NULL); \
+  unsigned ms = (tv.tv_sec * 1000 + tv.tv_usec / 1000) - (start_tv.tv_sec * 1000 + start_tv.tv_usec / 1000); \
+  if(ms > 1000) { \
+    mrb_raise(mrb, mrb->eException_class, "Timeout"); \
+    return mrb_nil_value(); \
+  } \
+}
 #endif
 
 #ifdef MRB_BYTECODE_DECODE_OPTION
@@ -1098,6 +1110,8 @@ mrb_vm_exec(mrb_state *mrb, const struct RProc *proc, const mrb_code *pc)
   uint16_t b;
   uint16_t c;
   mrb_sym mid;
+  uint32_t opcode_counter = 0;
+  struct timeval start_tv;
   const struct mrb_irep_catch_handler *ch;
 
 #ifdef DIRECT_THREADED
@@ -1109,6 +1123,9 @@ mrb_vm_exec(mrb_state *mrb, const struct RProc *proc, const mrb_code *pc)
 #endif
 
   mrb_bool exc_catched = FALSE;
+
+  gettimeofday(&start_tv, NULL);
+
 RETRY_TRY_BLOCK:
 
   MRB_TRY(&c_jmp) {
