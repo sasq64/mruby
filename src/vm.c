@@ -992,7 +992,7 @@ if(opcode_counter++ == 1000) { \
   struct timeval tv; \
   gettimeofday(&tv, NULL); \
   unsigned ms = (tv.tv_sec * 1000 + tv.tv_usec / 1000) - (start_tv.tv_sec * 1000 + start_tv.tv_usec / 1000); \
-  if(ms > 1000) { \
+  if(ms > 5000) { \
     mrb_raise(mrb, mrb->eException_class, "Timeout"); \
     return mrb_nil_value(); \
   } \
