@@ -906,10 +906,29 @@ void mrb_hash_check_kdict(mrb_state *mrb, mrb_value self);
 MRB_API mrb_int
 mrb_get_args(mrb_state *mrb, const char *format, ...)
 {
+  va_list ap;
+  va_start(ap, format);
+  mrb_int rc = mrb_get_args_v(mrb, format, NULL, ap);
+  va_end(ap);
+  return rc;
+}
+
+MRB_API mrb_int
+mrb_get_args_a(mrb_state *mrb, const char *format, const char* args)
+{
+  va_list ap = NULL;
+  mrb_int rc = mrb_get_args_v(mrb, format, args, ap);
+  return rc;
+}
+
+#define GET_ARG(_type) (ptr ? ( ptr += sizeof(_type),  ((_type*)ptr)[-1] ) : va_arg(ap, _type))
+
+MRB_API mrb_int
+mrb_get_args_v(mrb_state *mrb, const char *format, const char* ptr, va_list ap)
+{
   const char *fmt = format;
   char c;
   mrb_int i = 0;
-  va_list ap;
   mrb_int argc = mrb->c->ci->argc;
   mrb_value *array_argv = mrb->c->ci->stack+1;
   mrb_bool argv_on_stack = argc >= 0;
@@ -925,7 +944,6 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
     array_argv = ARY_PTR(a);
     argc = ARY_LEN(a);
   }
-  va_start(ap, format);
 
 #define ARGV array_argv
 
@@ -997,7 +1015,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (i < argc) {
           *p = argv[i++];
         }
@@ -1007,7 +1025,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (i < argc) {
           mrb_value ss;
 
@@ -1023,7 +1041,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         struct RClass **p;
 
-        p = va_arg(ap, struct RClass**);
+        p = GET_ARG(struct RClass**);
         if (i < argc) {
           mrb_value ss;
 
@@ -1039,7 +1057,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (i < argc) {
           *p = argv[i++];
           if (!(altmode && mrb_nil_p(*p))) {
@@ -1052,7 +1070,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (i < argc) {
           *p = argv[i++];
           if (!(altmode && mrb_nil_p(*p))) {
@@ -1065,7 +1083,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (i < argc) {
           *p = argv[i++];
           if (!(altmode && mrb_nil_p(*p))) {
@@ -1080,8 +1098,8 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         const char **ps = 0;
         mrb_int *pl = 0;
 
-        ps = va_arg(ap, const char**);
-        pl = va_arg(ap, mrb_int*);
+        ps = GET_ARG(const char**);
+        pl = GET_ARG(mrb_int*);
         if (i < argc) {
           ss = argv[i++];
           if (altmode && mrb_nil_p(ss)) {
@@ -1101,7 +1119,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         mrb_value ss;
         const char **ps;
 
-        ps = va_arg(ap, const char**);
+        ps = GET_ARG(const char**);
         if (i < argc) {
           ss = argv[i++];
           if (altmode && mrb_nil_p(ss)) {
@@ -1121,8 +1139,8 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         const mrb_value **pb;
         mrb_int *pl;
 
-        pb = va_arg(ap, const mrb_value**);
-        pl = va_arg(ap, mrb_int*);
+        pb = GET_ARG(const mrb_value**);
+        pl = GET_ARG(mrb_int*);
         if (i < argc) {
           aa = argv[i++];
           if (altmode && mrb_nil_p(aa)) {
@@ -1143,7 +1161,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         void* *p;
         mrb_value ss;
 
-        p = va_arg(ap, void**);
+        p = GET_ARG(void**);
         if (i < argc) {
           ss = argv[i++];
           if (!mrb_istruct_p(ss))
@@ -1159,7 +1177,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_float *p;
 
-        p = va_arg(ap, mrb_float*);
+        p = GET_ARG(mrb_float*);
         if (i < argc) {
           *p = mrb_as_float(mrb, argv[i]); i++;
         }
@@ -1170,7 +1188,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_int *p;
 
-        p = va_arg(ap, mrb_int*);
+        p = GET_ARG(mrb_int*);
         if (i < argc) {
           *p = mrb_as_int(mrb, argv[i]); i++;
         }
@@ -1178,7 +1196,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       break;
     case 'b':
       {
-        mrb_bool *boolp = va_arg(ap, mrb_bool*);
+        mrb_bool *boolp = GET_ARG(mrb_bool*);
 
         if (i < argc) {
           mrb_value b = argv[i++];
@@ -1190,7 +1208,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_sym *symp;
 
-        symp = va_arg(ap, mrb_sym*);
+        symp = GET_ARG(mrb_sym*);
         if (i < argc) {
           mrb_value ss;
 
@@ -1204,8 +1222,8 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         void** datap;
         struct mrb_data_type const* type;
 
-        datap = va_arg(ap, void**);
-        type = va_arg(ap, struct mrb_data_type const*);
+        datap = GET_ARG(void**);
+        type = GET_ARG(struct mrb_data_type const*);
         if (i < argc) {
           mrb_value dd = argv[i++];
           if (altmode && mrb_nil_p(dd)) {
@@ -1222,7 +1240,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_value *p, *bp;
 
-        p = va_arg(ap, mrb_value*);
+        p = GET_ARG(mrb_value*);
         if (mrb->c->ci->argc < 0) {
           bp = mrb->c->ci->stack + 2;
         }
@@ -1243,7 +1261,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
       {
         mrb_bool *p;
 
-        p = va_arg(ap, mrb_bool*);
+        p = GET_ARG(mrb_bool*);
         *p = given;
       }
       break;
@@ -1254,8 +1272,8 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
         mrb_int *pl;
         mrb_bool nocopy = (altmode || !argv_on_stack) ? TRUE : FALSE;
 
-        var = va_arg(ap, const mrb_value**);
-        pl = va_arg(ap, mrb_int*);
+        var = GET_ARG(const mrb_value**);
+        pl = GET_ARG(mrb_int*);
         if (argc > i) {
           *pl = argc-i;
           if (*pl > 0) {
@@ -1280,7 +1298,7 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
     case ':':
       {
         mrb_value ksrc = mrb_hash_p(kdict) ? mrb_hash_dup(mrb, kdict) : mrb_hash_new(mrb);
-        const mrb_kwargs *kwargs = va_arg(ap, const mrb_kwargs*);
+        const mrb_kwargs *kwargs = GET_ARG(const mrb_kwargs*);
         mrb_value *rest;
 
         if (kwargs == NULL) {
@@ -1345,7 +1363,6 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
   }
 
 finish:
-  va_end(ap);
   return i;
 }
 

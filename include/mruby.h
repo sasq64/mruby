@@ -978,6 +978,10 @@ struct mrb_kwargs
  * @see mrb_kwargs
  */
 MRB_API mrb_int mrb_get_args(mrb_state *mrb, mrb_args_format format, ...);
+MRB_API mrb_int mrb_get_args_a(mrb_state *mrb, const char *format, const char* ptr);
+
+// Internal
+MRB_API mrb_int mrb_get_args_v(mrb_state *mrb, const char *format, const char* ptr, va_list ap);
 
 MRB_INLINE mrb_sym
 mrb_get_mid(mrb_state *mrb) /* get method symbol */
