@@ -914,17 +914,17 @@ mrb_get_args(mrb_state *mrb, const char *format, ...)
 }
 
 MRB_API mrb_int
-mrb_get_args_a(mrb_state *mrb, const char *format, const char* args)
+mrb_get_args_a(mrb_state *mrb, const char *format, void** args)
 {
-  va_list ap = NULL;
+  va_list ap;
   mrb_int rc = mrb_get_args_v(mrb, format, args, ap);
   return rc;
 }
 
-#define GET_ARG(_type) (ptr ? ( ptr += sizeof(_type),  ((_type*)ptr)[-1] ) : va_arg(ap, _type))
+#define GET_ARG(_type) (ptr ? ((_type)(*ptr++)) : va_arg(ap, _type))
 
 MRB_API mrb_int
-mrb_get_args_v(mrb_state *mrb, const char *format, const char* ptr, va_list ap)
+mrb_get_args_v(mrb_state *mrb, const char *format, void** ptr, va_list ap)
 {
   const char *fmt = format;
   char c;
