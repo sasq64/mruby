@@ -3,6 +3,10 @@
 #include <mruby/array.h>
 #include <mruby/hash.h>
 #include <mruby/range.h>
+#include <mruby/string.h>
+#include <mruby/numeric.h>
+#include <mruby/proc.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 static mrb_value
@@ -66,13 +70,33 @@ mrb_f_caller(mrb_state *mrb, mrb_value self)
  *  call-seq:
  *     __method__         -> symbol
  *
- *  Returns the name at the definition of the current method as a
- *  Symbol.
+ *  Returns the called name of the current method as a Symbol.
  *  If called outside of a method, it returns <code>nil</code>.
  *
  */
 static mrb_value
 mrb_f_method(mrb_state *mrb, mrb_value self)
+{
+  mrb_callinfo *ci = mrb->c->ci;
+  ci--;
+  if (ci->proc && ci->proc->e.env && ci->proc->e.env->tt == MRB_TT_ENV && ci->proc->e.env->mid)
+    return mrb_symbol_value(ci->proc->e.env->mid);
+  else if (ci->mid)
+    return mrb_symbol_value(ci->mid);
+  else
+    return mrb_nil_value();
+}
+
+/*
+ *  call-seq:
+ *     __callee__         -> symbol
+ *
+ *  Returns the called name of the current method as a Symbol.
+ *  If called outside of a method, it returns <code>nil</code>.
+ *
+ */
+static mrb_value
+mrb_f_callee(mrb_state *mrb, mrb_value self)
 {
   mrb_callinfo *ci = mrb->c->ci;
   ci--;
@@ -107,11 +131,43 @@ mrb_f_method(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_f_integer(mrb_state *mrb, mrb_value self)
 {
-  mrb_value arg;
+  mrb_value val, tmp;
   mrb_int base = 0;
 
-  mrb_get_args(mrb, "o|i", &arg, &base);
-  return mrb_convert_to_integer(mrb, arg, base);
+  mrb_get_args(mrb, "o|i", &val, &base);
+  if (mrb_nil_p(val)) {
+    if (base != 0) goto arg_error;
+    mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Integer");
+  }
+  switch (mrb_type(val)) {
+#ifndef MRB_NO_FLOAT
+    case MRB_TT_FLOAT:
+      if (base != 0) goto arg_error;
+      return mrb_float_to_integer(mrb, val);
+#endif
+
+    case MRB_TT_INTEGER:
+      if (base != 0) goto arg_error;
+      return val;
+
+    case MRB_TT_STRING:
+    string_conv:
+      return mrb_str_to_integer(mrb, val, base, TRUE);
+
+    default:
+      break;
+  }
+  if (base != 0) {
+    tmp = mrb_obj_as_string(mrb, val);
+    if (mrb_string_p(tmp)) {
+      val = tmp;
+      goto string_conv;
+    }
+arg_error:
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "base specified for non string value");
+  }
+  /* to raise TypeError */
+  return mrb_ensure_integer_type(mrb, val);
 }
 
 #ifndef MRB_NO_FLOAT
@@ -132,7 +188,10 @@ mrb_f_float(mrb_state *mrb, mrb_value self)
 {
   mrb_value arg = mrb_get_arg1(mrb);
 
-  return mrb_to_float(mrb, arg);
+  if (mrb_string_p(arg)) {
+    return mrb_float_value(mrb, mrb_str_to_dbl(mrb, arg, TRUE));
+  }
+  return mrb_ensure_float_type(mrb, arg);
 }
 #endif
 
@@ -202,7 +261,8 @@ mrb_f_hash(mrb_state *mrb, mrb_value self)
   if (mrb_nil_p(arg) || (mrb_array_p(arg) && RARRAY_LEN(arg) == 0)) {
     return mrb_hash_new(mrb);
   }
-  return mrb_ensure_hash_type(mrb, arg);
+  mrb_ensure_hash_type(mrb, arg);
+  return arg;
 }
 
 void
@@ -213,6 +273,7 @@ mrb_mruby_kernel_ext_gem_init(mrb_state *mrb)
   mrb_define_module_function(mrb, krn, "fail", mrb_f_raise, MRB_ARGS_OPT(2));
   mrb_define_module_function(mrb, krn, "caller", mrb_f_caller, MRB_ARGS_OPT(2));
   mrb_define_method(mrb, krn, "__method__", mrb_f_method, MRB_ARGS_NONE());
+  mrb_define_method(mrb, krn, "__callee__", mrb_f_callee, MRB_ARGS_NONE());
   mrb_define_module_function(mrb, krn, "Integer", mrb_f_integer, MRB_ARGS_ARG(1,1));
 #ifndef MRB_NO_FLOAT
   mrb_define_module_function(mrb, krn, "Float", mrb_f_float, MRB_ARGS_REQ(1));

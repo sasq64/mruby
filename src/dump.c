@@ -1,15 +1,15 @@
 /*
-** cdump.c - mruby binary dumper (in C)
+** dump.c - mruby binary dumper (mrbc binary format)
 **
 ** See Copyright Notice in mruby.h
 */
 
-#include <string.h>
-#include <math.h>
+#include <mruby.h>
 #include <mruby/dump.h>
 #include <mruby/string.h>
 #include <mruby/irep.h>
 #include <mruby/debug.h>
+#include <string.h>
 
 #ifndef MRB_NO_FLOAT
 #include <mruby/endian.h>
@@ -51,7 +51,7 @@ get_iseq_block_size(mrb_state *mrb, const mrb_irep *irep)
   size_t size = 0;
 
   size += sizeof(uint16_t); /* clen */
-  size += sizeof(uint16_t); /* ilen */
+  size += sizeof(uint32_t); /* ilen */
   size += irep->ilen * sizeof(mrb_code); /* iseq(n) */
   size += irep->clen * sizeof(struct mrb_irep_catch_handler);
 
@@ -66,7 +66,7 @@ write_iseq_block(mrb_state *mrb, const mrb_irep *irep, uint8_t *buf, uint8_t fla
                   irep->clen * sizeof(struct mrb_irep_catch_handler);
 
   cur += uint16_to_bin(irep->clen, cur); /* number of catch handlers */
-  cur += uint16_to_bin(irep->ilen, cur); /* number of opcode */
+  cur += uint32_to_bin(irep->ilen, cur); /* number of opcode */
   memcpy(cur, irep->iseq, seqlen);
   cur += seqlen;
 
@@ -110,7 +110,7 @@ get_pool_block_size(mrb_state *mrb, const mrb_irep *irep)
 
     switch (irep->pool[pool_no].tt) {
     case IREP_TT_INT64:
-#ifdef MRB_64BIT
+#if defined(MRB_64BIT) || defined(MRB_INT64)
       {
         int64_t i = irep->pool[pool_no].u.i64;
 
@@ -131,7 +131,6 @@ get_pool_block_size(mrb_state *mrb, const mrb_irep *irep)
       {
         mrb_int len = irep->pool[pool_no].u.str[0];
         mrb_assert_int_fit(mrb_int, len, size_t, SIZE_MAX);
-        size += sizeof(uint8_t);
         size += (size_t)len+2;
       }
       break;
@@ -173,8 +172,8 @@ write_pool_block(mrb_state *mrb, const mrb_irep *irep, uint8_t *buf)
     int ai = mrb_gc_arena_save(mrb);
 
     switch (irep->pool[pool_no].tt) {
-#ifdef MRB_64BIT
     case IREP_TT_INT64:
+#if defined(MRB_64BIT) || defined(MRB_INT64)
       {
         int64_t i = irep->pool[pool_no].u.i64;
         if (i < INT32_MIN || INT32_MAX < i) {
@@ -199,7 +198,6 @@ write_pool_block(mrb_state *mrb, const mrb_irep *irep, uint8_t *buf)
       len = irep->pool[pool_no].u.str[0];
       memcpy(cur, irep->pool[pool_no].u.str, (size_t)len+2);
       cur += len+2;
-      *cur++ = '\0';
       break;
 
     case IREP_TT_FLOAT:
@@ -454,7 +452,7 @@ get_filename_table_size(mrb_state *mrb, const mrb_irep *irep, mrb_sym **fp, uint
     if (find_filename_index(filenames, *lp, file->filename_sym) == -1) {
       /* register filename */
       *lp += 1;
-      *fp = filenames = (mrb_sym *)mrb_realloc(mrb, filenames, sizeof(mrb_sym) * (*lp));
+      *fp = filenames = (mrb_sym*)mrb_realloc(mrb, filenames, sizeof(mrb_sym) * (*lp));
       filenames[*lp - 1] = file->filename_sym;
 
       /* filename */
@@ -559,7 +557,7 @@ write_section_debug(mrb_state *mrb, const mrb_irep *irep, uint8_t *cur, mrb_sym 
     return MRB_DUMP_INVALID_ARGUMENT;
   }
 
-  header = (struct rite_section_debug_header *)bin;
+  header = (struct rite_section_debug_header*)bin;
   cur += sizeof(struct rite_section_debug_header);
   section_size += sizeof(struct rite_section_debug_header);
 
@@ -730,7 +728,7 @@ lv_section_exit:
 static int
 write_rite_binary_header(mrb_state *mrb, size_t binary_size, uint8_t *bin, uint8_t flags)
 {
-  struct rite_binary_header *header = (struct rite_binary_header *)bin;
+  struct rite_binary_header *header = (struct rite_binary_header*)bin;
 
   memcpy(header->binary_ident, RITE_BINARY_IDENT, sizeof(header->binary_ident));
   memcpy(header->major_version, RITE_BINARY_MAJOR_VER, sizeof(header->major_version));

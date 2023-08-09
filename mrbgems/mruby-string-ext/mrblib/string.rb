@@ -111,36 +111,6 @@ class String
     (s == self) ? nil : self.replace(s)
   end
 
-  ##
-  # call-seq:
-  #    str.casecmp(other_str)   -> -1, 0, +1 or nil
-  #
-  # Case-insensitive version of <code>String#<=></code>.
-  #
-  #    "abcdef".casecmp("abcde")     #=> 1
-  #    "aBcDeF".casecmp("abcdef")    #=> 0
-  #    "abcdef".casecmp("abcdefg")   #=> -1
-  #    "abcdef".casecmp("ABCDEF")    #=> 0
-  #
-  def casecmp(str)
-    self.downcase <=> str.__to_str.downcase
-  rescue NoMethodError
-    nil
-  end
-
-  ##
-  # call-seq:
-  #   str.casecmp?(other)  -> true, false, or nil
-  #
-  # Returns true if str and other_str are equal after case folding,
-  # false if they are not equal, and nil if other_str is not a string.
-
-  def casecmp?(str)
-    c = self.casecmp(str)
-    return nil if c.nil?
-    return c == 0
-  end
-
   def partition(sep)
     raise TypeError, "type mismatch: #{sep.class} given" unless sep.is_a? String
     n = index(sep)
@@ -181,7 +151,7 @@ class String
   #
   def slice!(arg1, arg2=nil)
     raise FrozenError, "can't modify frozen String" if frozen?
-    raise "wrong number of arguments (for 1..2)" if arg1.nil? && arg2.nil?
+    raise ArgumentError, "wrong number of arguments (expected 1..2)" if arg1.nil? && arg2.nil?
 
     if !arg1.nil? && !arg2.nil?
       idx = arg1
@@ -303,7 +273,7 @@ class String
   #  call-seq:
   #     str.center(width, padstr=' ')   -> new_str
   #
-  #  Centers +str+ in +width+.  If +width+ is greater than the length of +str+,
+  #  Centers +str+ in +width+. If +width+ is greater than the length of +str+,
   #  returns a new String of length +width+ with +str+ centered and padded with
   #  +padstr+; otherwise, returns +str+.
   #
@@ -364,8 +334,12 @@ class String
   #    a = "world"
   #    a.prepend("hello ") #=> "hello world"
   #    a                   #=> "hello world"
-  def prepend(arg)
-    self[0, 0] = arg
+  def prepend(*args)
+    len = args.size
+    while len > 0
+      len -= 1
+      self[0, 0] = args[len]
+    end
     self
   end
 
@@ -398,7 +372,7 @@ class String
   #  Iterates through successive values, starting at <i>str</i> and
   #  ending at <i>other_str</i> inclusive, passing each value in turn to
   #  the block. The <code>String#succ</code> method is used to generate
-  #  each value.  If optional second argument exclusive is omitted or is false,
+  #  each value. If optional second argument exclusive is omitted or is false,
   #  the last value will be included; otherwise it will be excluded.
   #
   #  If no block is given, an enumerator is returned instead.

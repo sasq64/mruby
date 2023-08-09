@@ -3,13 +3,27 @@ require 'test/assert.rb'
 
 GEMNAME = ""
 
-def cmd(s)
+def cmd_list(s)
   path = s == "mrbc" ? ENV['MRBCFILE'] : "#{ENV['BUILD_DIR']}/bin/#{s}"
   path = path.sub(/\.exe\z/, "")
   if /mswin(?!ce)|mingw|bccwin/ =~ RbConfig::CONFIG['host_os']
     path = "#{path}.exe".tr("/", "\\")
   end
-  path
+
+  path_list = [path]
+
+  emu = ENV['EMULATOR']
+  path_list.unshift emu if emu && !emu.empty?
+
+  path_list
+end
+
+def cmd(s)
+  cmd_list(s).join(' ')
+end
+
+def cmd_bin(s)
+  cmd_list(s).pop
 end
 
 def shellquote(s)
@@ -30,7 +44,7 @@ ARGV.each do |gem|
 
   case RbConfig::CONFIG['host_os']
   when /mswin(?!ce)|mingw|bccwin/
-    gem = gem.gsub('\\', '/')
+    gem = gem.tr('\\', '/')
   end
 
   Dir["#{gem}/bintest/**/*.rb"].each do |file|

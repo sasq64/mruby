@@ -676,6 +676,11 @@ assert('Hash#merge', '15.2.13.4.22') do
     h1, h2 = entries1.hash_for, entries2.hash_for
     k2.callback = ->(name, *){h2.clear if name == :hash}
     assert_nothing_crashed{h1.merge(h2)}
+
+    # single arguments
+    assert_equal({a:1,b:2}, {a:1}.merge({b:2}))
+    # multiple arguments
+    assert_equal({a:1,b:2,c:3}, {a:1}.merge({b:2},{c:3}))
   end
 end
 
@@ -875,17 +880,6 @@ end
       hh[hh] = :recur
       assert_equal("{#{s}, {...}=>:recur}", hh.__send__(meth))
     end
-
-    [ar_entries, ht_entries].each do |entries|
-      cls = Class.new do
-        attr_accessor :h
-        def inspect; @h.replace(@h.dup); to_s; end
-      end
-      v = cls.new
-      h = entries.hash_for({_k: v})
-      v.h = h
-      assert_nothing_raised{h.__send__(meth)}
-    end
   end
 end
 
@@ -1005,4 +999,10 @@ assert('#== receiver should be specified value') do
     v1.error = false
     %i[has_value? value?].each{|m| assert_nothing_raised{h.__send__(m, v1)}}
   end
+end
+
+assert('test value ommision') do
+  x = 1
+  y = 2
+  assert_equal({x:1, y:2}, {x:, y:})
 end

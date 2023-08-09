@@ -46,6 +46,7 @@
 //#define MRB_NO_METHOD_CACHE
 /* size of the method cache (need to be the power of 2) */
 //#define MRB_METHOD_CACHE_SIZE (1<<8)
+//#define MRB_USE_INLINE_METHOD_CACHE
 
 /* add -DMRB_USE_METHOD_T_STRUCT on machines that use higher bits of function pointers */
 /* no MRB_USE_METHOD_T_STRUCT requires highest 2 bits of function pointers to be zero */
@@ -79,6 +80,9 @@
 # define MRB_WORD_BOXING
 #endif
 
+/* if defined mruby allocates Float objects in the heap to keep full precision if needed */
+//#define MRB_WORDBOX_NO_FLOAT_TRUNCATE
+
 /* add -DMRB_INT32 to use 32bit integer for mrb_int; conflict with MRB_INT64;
    Default for 32-bit CPU mode. */
 //#define MRB_INT32
@@ -104,17 +108,33 @@
 /* string class to handle UTF-8 encoding */
 //#define MRB_UTF8_STRING
 
+/* maximum length of strings */
+/* the default value is 1MB */
+/* set this value to zero to skip the check */
+//#define MRB_STR_LENGTH_MAX 1048576
+
+/* maximum length of arrays */
+/* the default value is 2**17 entries */
+/* set this value to zero to skip the check */
+//#define MRB_ARY_LENGTH_MAX 131072
+
 /* argv max size in mrb_funcall */
 //#define MRB_FUNCALL_ARGC_MAX 16
 
 /* number of object per heap page */
 //#define MRB_HEAP_PAGE_SIZE 1024
 
-/* if __ehdr_start is available, mruby can reduce memory used by symbols */
-//#define MRB_USE_LINK_TIME_RO_DATA_P
+/* define if your platform does not support etext, edata */
+//#define MRB_NO_DEFAULT_RO_DATA_P
 
-/* if MRB_USE_LINK_TIME_RO_DATA_P does not work,
-   you can try mrb_ro_data_p() that you have implemented yourself in any file;
+/* define if your platform supports etext, edata */
+//#define MRB_USE_RO_DATA_P_ETEXT
+/* use MRB_USE_ETEXT_RO_DATA_P by default on Linux */
+#if (defined(__linux__) && !defined(__KERNEL__))
+#define MRB_USE_ETEXT_RO_DATA_P
+#endif
+
+/* you can provide and use mrb_ro_data_p() for your platform.
    prototype is `mrb_bool mrb_ro_data_p(const char *ptr)` */
 //#define MRB_USE_CUSTOM_RO_DATA_P
 
@@ -156,8 +176,8 @@
 #if defined(DISABLE_STDIO) || defined(MRB_DISABLE_STDIO)
 # define MRB_NO_STDIO
 #endif
-#ifdef MRB_DISABLE_DIRECT_THREADING
-# define MRB_NO_DIRECT_THREADING
+#if defined(MRB_DISABLE_DIRECT_THREADING) || defined(MRB_NO_DIRECT_THREADING)
+# define MRB_USE_VM_SWITCH_DISPATCH
 #endif
 #if defined(ENABLE_DEBUG) || defined(MRB_ENABLE_DEBUG_HOOK)
 # define MRB_USE_DEBUG_HOOK

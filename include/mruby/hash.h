@@ -35,10 +35,7 @@ struct RHash {
 #define mrb_hash_ptr(v)    ((struct RHash*)(mrb_ptr(v)))
 #define mrb_hash_value(p)  mrb_obj_value((void*)(p))
 
-size_t mrb_hash_memsize(mrb_value obj);
 MRB_API mrb_value mrb_hash_new_capa(mrb_state *mrb, mrb_int capa);
-MRB_API mrb_value mrb_ensure_hash_type(mrb_state *mrb, mrb_value hash);
-MRB_API mrb_value mrb_check_hash_type(mrb_state *mrb, mrb_value hash);
 
 /*
  * Initializes a new hash.
@@ -227,11 +224,6 @@ MRB_API void mrb_hash_merge(mrb_state *mrb, mrb_value hash1, mrb_value hash2);
 #define MRB_HASH_HT                 (1 << (MRB_HASH_SIZE_FLAGS_SHIFT + 2))
 #define MRB_RHASH_DEFAULT_P(hash) (RHASH(hash)->flags & MRB_HASH_DEFAULT)
 #define MRB_RHASH_PROCDEFAULT_P(hash) (RHASH(hash)->flags & MRB_HASH_PROC_DEFAULT)
-
-/* GC functions */
-void mrb_gc_mark_hash(mrb_state*, struct RHash*);
-size_t mrb_gc_mark_hash_size(mrb_state*, struct RHash*);
-void mrb_gc_free_hash(mrb_state*, struct RHash*);
 
 /* return non zero to break the loop */
 typedef int (mrb_hash_foreach_func)(mrb_state *mrb, mrb_value key, mrb_value val, void *data);

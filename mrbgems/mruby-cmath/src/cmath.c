@@ -15,7 +15,6 @@
 # error CMath conflicts with 'MRB_NO_FLOAT' configuration
 #endif
 
-#include <math.h>
 #include <complex.h>
 
 mrb_value mrb_complex_new(mrb_state *mrb, mrb_float real, mrb_float imag);
@@ -34,7 +33,7 @@ cmath_get_complex(mrb_state *mrb, mrb_value c, mrb_float *r, mrb_float *i)
     *i = 0;
     return FALSE;
   }
-  else if (mrb_obj_is_kind_of(mrb, c, mrb_class_get(mrb, "Complex"))) {
+  else if (mrb_type(c) == MRB_TT_COMPLEX) {
     mrb_complex_get(mrb, c, r, i);
     return TRUE;
   }
@@ -77,13 +76,13 @@ CXDIVc(mrb_complex a, mrb_complex b)
   if ((abi = cimag(b)) < 0)
     abi = - abi;
   if (abr <= abi) {
-    ratio = creal(b) / cimag(b) ;
+    ratio = creal(b) / cimag(b);
     den = cimag(a) * (1 + ratio*ratio);
     cr = (creal(a)*ratio + cimag(a)) / den;
     ci = (cimag(a)*ratio - creal(a)) / den;
   }
   else {
-    ratio = cimag(b) / creal(b) ;
+    ratio = cimag(b) / creal(b);
     den = creal(a) * (1 + ratio*ratio);
     cr = (creal(a) + cimag(a)*ratio) / den;
     ci = (cimag(a) - creal(a)*ratio) / den;
@@ -93,7 +92,7 @@ CXDIVc(mrb_complex a, mrb_complex b)
 
 #else
 
-#if defined(__cplusplus) && defined(__APPLE__)
+#if defined(__cplusplus) && (defined(__APPLE__) || (defined(__clang__) && (defined(__FreeBSD__) || defined(__OpenBSD__))))
 
 #ifdef MRB_USE_FLOAT32
 typedef std::complex<float> mrb_complex;

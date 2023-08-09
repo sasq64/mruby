@@ -15,20 +15,41 @@
 #include <mruby/error.h>
 #include <mruby/class.h>
 #include <mruby/throw.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
-MRB_API mrb_value
-mrb_exc_new(mrb_state *mrb, struct RClass *c, const char *ptr, size_t len)
+void
+mrb_exc_mesg_set(mrb_state *mrb, struct RException *exc, mrb_value mesg)
 {
-  mrb_value arg = mrb_str_new(mrb, ptr, len);
-  return mrb_obj_new(mrb, c, 1, &arg);
+  if (!mrb_string_p(mesg)) {
+    mesg = mrb_obj_as_string(mrb, mesg);
+  }
+  exc->mesg = mrb_obj_ptr(mesg);
+  mrb_field_write_barrier_value(mrb, (struct RBasic*)exc, mesg);
+}
+
+mrb_value
+mrb_exc_mesg_get(mrb_state *mrb, struct RException *exc)
+{
+  if (exc->mesg == NULL) return mrb_nil_value();
+  return mrb_obj_value(exc->mesg);
 }
 
 MRB_API mrb_value
 mrb_exc_new_str(mrb_state *mrb, struct RClass* c, mrb_value str)
 {
-  mrb_to_str(mrb, str);
-  return mrb_obj_new(mrb, c, 1, &str);
+  mrb_ensure_string_type(mrb, str);
+
+  struct RException *e = MRB_OBJ_ALLOC(mrb, MRB_TT_EXCEPTION, c);
+  mrb_value exc = mrb_obj_value(e);
+  mrb_exc_mesg_set(mrb, e, str);
+  return exc;
+}
+
+MRB_API mrb_value
+mrb_exc_new(mrb_state *mrb, struct RClass *c, const char *ptr, mrb_int len)
+{
+  return mrb_exc_new_str(mrb, c, mrb_str_new(mrb, ptr, len));
 }
 
 /*
@@ -45,7 +66,7 @@ exc_initialize(mrb_state *mrb, mrb_value exc)
   mrb_value mesg;
 
   if (mrb_get_args(mrb, "|o", &mesg) == 1) {
-    mrb_iv_set(mrb, exc, MRB_SYM(mesg), mesg);
+    mrb_exc_mesg_set(mrb, mrb_exc_ptr(exc), mesg);
   }
   return exc;
 }
@@ -74,7 +95,7 @@ exc_exception(mrb_state *mrb, mrb_value self)
   if (argc == 0) return self;
   if (mrb_obj_equal(mrb, self, a)) return self;
   exc = mrb_obj_clone(mrb, self);
-  mrb_iv_set(mrb, exc, MRB_SYM(mesg), a);
+  mrb_exc_mesg_set(mrb, mrb_exc_ptr(exc), a);
 
   return exc;
 }
@@ -90,7 +111,7 @@ exc_exception(mrb_state *mrb, mrb_value self)
 static mrb_value
 exc_to_s(mrb_state *mrb, mrb_value exc)
 {
-  mrb_value mesg = mrb_attr_get(mrb, exc, MRB_SYM(mesg));
+  mrb_value mesg = mrb_exc_mesg_get(mrb, mrb_exc_ptr(exc));
   struct RObject *p;
 
   if (!mrb_string_p(mesg)) {
@@ -101,20 +122,6 @@ exc_to_s(mrb_state *mrb, mrb_value exc)
     p->c = mrb->string_class;
   }
   return mesg;
-}
-
-/*
- * call-seq:
- *   exception.message   ->  string
- *
- * Returns the result of invoking <code>exception.to_s</code>.
- * Normally this returns the exception's message or name.
- */
-
-static mrb_value
-exc_message(mrb_state *mrb, mrb_value exc)
-{
-  return mrb_funcall_id(mrb, exc, MRB_SYM(to_s), 0);
 }
 
 /*
@@ -130,10 +137,9 @@ exc_message(mrb_state *mrb, mrb_value exc)
 mrb_value
 mrb_exc_inspect(mrb_state *mrb, mrb_value exc)
 {
-  mrb_value mesg = mrb_attr_get(mrb, exc, MRB_SYM(mesg));
   mrb_value cname = mrb_mod_to_s(mrb, mrb_obj_value(mrb_obj_class(mrb, exc)));
-  mesg = mrb_obj_as_string(mrb, mesg);
-  return RSTRING_LEN(mesg) == 0 ? cname : mrb_format(mrb, "%v (%v)", mesg, cname);
+  mrb_value mesg = mrb_exc_mesg_get(mrb, mrb_exc_ptr(exc)); /* string or nil */
+  return (mrb_nil_p(mesg)||RSTRING_LEN(mesg)==0) ? cname : mrb_format(mrb, "%v (%v)", mesg, cname);
 }
 
 void mrb_keep_backtrace(mrb_state *mrb, mrb_value exc);
@@ -154,7 +160,8 @@ set_backtrace(mrb_state *mrb, mrb_value exc, mrb_value backtrace)
       p++;
     }
   }
-  mrb_iv_set(mrb, exc, MRB_SYM(backtrace), backtrace);
+  mrb_exc_ptr(exc)->backtrace = mrb_obj_ptr(backtrace);
+  mrb_field_write_barrier_value(mrb, mrb_basic_ptr(exc), backtrace);
 }
 
 static mrb_value
@@ -188,7 +195,7 @@ static mrb_noreturn void
 exc_throw(mrb_state *mrb, mrb_value exc)
 {
   if (!mrb->jmp) {
-    mrb_p(mrb, exc);
+    mrb_print_error(mrb);
     abort();
   }
   MRB_THROW(mrb->jmp);
@@ -201,7 +208,7 @@ mrb_exc_raise(mrb_state *mrb, mrb_value exc)
     mrb->exc = mrb_obj_ptr(exc);
   }
   else {
-    if (!mrb_obj_is_kind_of(mrb, exc, mrb->eException_class)) {
+    if (mrb_type(exc) != MRB_TT_EXCEPTION) {
       mrb_raise(mrb, E_TYPE_ERROR, "exception object expected");
     }
     mrb_exc_set(mrb, exc);
@@ -271,7 +278,7 @@ mrb_vformat(mrb_state *mrb, const char *format, va_list ap)
     if (c == '%') {
       if (*p == '!') {
         inspect = TRUE;
-        ++p;
+        p++;
       }
       if (!*p) break;
       switch (*p) {
@@ -386,41 +393,37 @@ mrb_format(mrb_state *mrb, const char *format, ...)
   return str;
 }
 
-static mrb_noreturn void
-raise_va(mrb_state *mrb, struct RClass *c, const char *fmt, va_list ap, int argc, mrb_value *argv)
+static mrb_value
+error_va(mrb_state *mrb, struct RClass *c, const char *fmt, va_list ap)
 {
-  mrb_value mesg;
-
-  mesg = mrb_vformat(mrb, fmt, ap);
-  if (argv == NULL) {
-    argv = &mesg;
-  }
-  else {
-    argv[0] = mesg;
-  }
-  mrb_exc_raise(mrb, mrb_obj_new(mrb, c, argc+1, argv));
+  mrb_value mesg = mrb_vformat(mrb, fmt, ap);
+  return mrb_exc_new_str(mrb, c, mesg);
 }
 
 MRB_API mrb_noreturn void
 mrb_raisef(mrb_state *mrb, struct RClass *c, const char *fmt, ...)
 {
-  va_list args;
+  va_list ap;
+  mrb_value exc;
 
-  va_start(args, fmt);
-  raise_va(mrb, c, fmt, args, 0, NULL);
-  va_end(args);
+  va_start(ap, fmt);
+  exc = error_va(mrb, c, fmt, ap);
+  va_end(ap);
+
+  mrb_exc_raise(mrb, exc);
 }
 
 MRB_API mrb_noreturn void
 mrb_name_error(mrb_state *mrb, mrb_sym id, const char *fmt, ...)
 {
-  mrb_value argv[2];
-  va_list args;
+  va_list ap;
+  mrb_value exc;
 
-  va_start(args, fmt);
-  argv[1] = mrb_symbol_value(id);
-  raise_va(mrb, E_NAME_ERROR, fmt, args, 1, argv);
-  va_end(args);
+  va_start(ap, fmt);
+  exc = error_va(mrb, E_NAME_ERROR, fmt, ap);
+  va_end(ap);
+  mrb_iv_set(mrb, exc, MRB_IVSYM(name), mrb_symbol_value(id));
+  mrb_exc_raise(mrb, exc);
 }
 
 MRB_API void
@@ -440,112 +443,102 @@ mrb_warn(mrb_state *mrb, const char *fmt, ...)
 }
 
 MRB_API mrb_noreturn void
-mrb_bug(mrb_state *mrb, const char *fmt, ...)
+mrb_bug(mrb_state *mrb, const char *mesg)
 {
 #ifndef MRB_NO_STDIO
-  va_list ap;
-  mrb_value str;
-
-  va_start(ap, fmt);
-  str = mrb_vformat(mrb, fmt, ap);
   fputs("bug: ", stderr);
-  fwrite(RSTRING_PTR(str), RSTRING_LEN(str), 1, stderr);
-  va_end(ap);
+  fputs(mesg, stderr);
+  fputs("\n", stderr);
 #endif
   exit(EXIT_FAILURE);
 }
 
-MRB_API mrb_value
-mrb_make_exception(mrb_state *mrb, mrb_int argc, const mrb_value *argv)
+mrb_value
+mrb_make_exception(mrb_state *mrb, mrb_value exc, mrb_value mesg)
 {
-  mrb_value mesg;
-  int n;
+  mrb_int n = 1;
 
-  mesg = mrb_nil_value();
-  switch (argc) {
-    case 0:
-    break;
-    case 1:
-      if (mrb_nil_p(argv[0]))
-        break;
-      if (mrb_string_p(argv[0])) {
-        mesg = mrb_exc_new_str(mrb, E_RUNTIME_ERROR, argv[0]);
-        break;
-      }
-      n = 0;
-      goto exception_call;
-
-    case 2:
-    case 3:
-      n = 1;
-exception_call:
-      {
-        mrb_sym exc = MRB_SYM(exception);
-        if (mrb_respond_to(mrb, argv[0], exc)) {
-          mesg = mrb_funcall_argv(mrb, argv[0], exc, n, argv+1);
-        }
-        else {
-          /* undef */
-          mrb_raise(mrb, E_TYPE_ERROR, "exception class/object expected");
-        }
-      }
-
-      break;
-    default:
-      mrb_argnum_error(mrb, argc, 0, 3);
-      break;
+  if (mrb_nil_p(mesg)) {
+    n = 0;
   }
-  if (argc > 0) {
-    if (!mrb_obj_is_kind_of(mrb, mesg, mrb->eException_class))
-      mrb_raise(mrb, mrb->eException_class, "exception object expected");
-    if (argc > 2)
-      set_backtrace(mrb, mesg, argv[2]);
+  if (mrb_class_p(exc)) {
+    exc = mrb_funcall_argv(mrb, exc, MRB_SYM(new), n, &mesg);
   }
-
-  return mesg;
+  else if (mrb_exception_p(exc)) {
+    if (n > 0) {
+      exc = mrb_obj_clone(mrb, exc);
+      mrb_exc_mesg_set(mrb, mrb_exc_ptr(exc), mesg);
+    }
+  }
+  else {
+    mrb_raise(mrb, E_TYPE_ERROR, "exception class/object expected");
+  }
+  if (mrb_type(exc) != MRB_TT_EXCEPTION) {
+    mrb_raise(mrb, E_EXCEPTION, "exception object expected");
+  }
+  return exc;
 }
 
-MRB_API void
+MRB_API mrb_noreturn void
 mrb_sys_fail(mrb_state *mrb, const char *mesg)
 {
   struct RClass *sce;
   mrb_int no;
 
   no = (mrb_int)errno;
-  if (mrb_class_defined(mrb, "SystemCallError")) {
-    sce = mrb_class_get(mrb, "SystemCallError");
+  if (mrb_class_defined_id(mrb, MRB_SYM(SystemCallError))) {
+    sce = mrb_class_get_id(mrb, MRB_SYM(SystemCallError));
     if (mesg != NULL) {
-      mrb_funcall(mrb, mrb_obj_value(sce), "_sys_fail", 2, mrb_fixnum_value(no), mrb_str_new_cstr(mrb, mesg));
+      mrb_funcall_id(mrb, mrb_obj_value(sce), MRB_SYM(_sys_fail), 2, mrb_fixnum_value(no), mrb_str_new_cstr(mrb, mesg));
     }
     else {
-      mrb_funcall(mrb, mrb_obj_value(sce), "_sys_fail", 1, mrb_fixnum_value(no));
+      mrb_funcall_id(mrb, mrb_obj_value(sce), MRB_SYM(_sys_fail), 1, mrb_fixnum_value(no));
     }
   }
-  else {
-    mrb_raise(mrb, E_RUNTIME_ERROR, mesg);
-  }
+
+  mrb_raise(mrb, E_RUNTIME_ERROR, mesg);
 }
 
 MRB_API mrb_noreturn void
 mrb_no_method_error(mrb_state *mrb, mrb_sym id, mrb_value args, char const* fmt, ...)
 {
-  mrb_value exc;
-  mrb_value argv[3];
   va_list ap;
+  mrb_value exc;
 
   va_start(ap, fmt);
-  argv[0] = mrb_vformat(mrb, fmt, ap);
-  argv[1] = mrb_symbol_value(id);
-  argv[2] = args;
+  exc = error_va(mrb, E_NOMETHOD_ERROR, fmt, ap);
   va_end(ap);
-  exc = mrb_obj_new(mrb, E_NOMETHOD_ERROR, 3, argv);
+  mrb_iv_set(mrb, exc, MRB_IVSYM(name), mrb_symbol_value(id));
+  mrb_iv_set(mrb, exc, MRB_IVSYM(args), args);
   mrb_exc_raise(mrb, exc);
+}
+
+static mrb_noreturn void
+frozen_error(mrb_state *mrb, mrb_value v)
+{
+  mrb_raisef(mrb, E_FROZEN_ERROR, "can't modify frozen %T", v);
 }
 
 MRB_API mrb_noreturn void
 mrb_frozen_error(mrb_state *mrb, void *frozen_obj)
 {
-  mrb_raisef(mrb, E_FROZEN_ERROR, "can't modify frozen %t", mrb_obj_value(frozen_obj));
+  frozen_error(mrb, mrb_obj_value(frozen_obj));
+}
+
+MRB_API void
+mrb_check_frozen(mrb_state *mrb, void *o)
+{
+  if (mrb_frozen_p((struct RBasic*)o)) {
+    mrb_frozen_error(mrb, o);
+  }
+}
+
+MRB_API void
+mrb_check_frozen_value(mrb_state *mrb, mrb_value v)
+{
+  if (mrb_immediate_p(v) || mrb_frozen_p(mrb_basic_ptr(v))) {
+    frozen_error(mrb, v);
+  }
 }
 
 MRB_API mrb_noreturn void
@@ -564,7 +557,7 @@ mrb_argnum_error(mrb_state *mrb, mrb_int argc, int min, int max)
 void mrb_core_init_printabort(void);
 
 int
-mrb_core_init_protect(mrb_state *mrb, void (*body)(mrb_state *, void *), void *opaque)
+mrb_core_init_protect(mrb_state *mrb, void (*body)(mrb_state*, void*), void *opaque)
 {
   struct mrb_jmpbuf *prev_jmp = mrb->jmp;
   struct mrb_jmpbuf c_jmp;
@@ -576,7 +569,7 @@ mrb_core_init_protect(mrb_state *mrb, void (*body)(mrb_state *, void *), void *o
     err = 0;
   } MRB_CATCH(&c_jmp) {
     if (mrb->exc) {
-      mrb_p(mrb, mrb_obj_value(mrb->exc));
+      mrb_print_error(mrb);
       mrb->exc = NULL;
     }
     else {
@@ -629,6 +622,44 @@ mrb_raise_nomemory(mrb_state *mrb)
   }
 }
 
+MRB_API void
+mrb_print_error(mrb_state *mrb)
+{
+#ifndef MRB_NO_STDIO
+  if (mrb->jmp == NULL) {
+    struct mrb_jmpbuf c_jmp;
+    MRB_TRY(&c_jmp) {
+      mrb->jmp = &c_jmp;
+      mrb_print_backtrace(mrb);
+    } MRB_CATCH(&c_jmp) {
+      /* ignore exception during print_backtrace() */
+    } MRB_END_EXC(&c_jmp);
+    mrb->jmp = NULL;
+  }
+  else {
+    mrb_print_backtrace(mrb);
+  }
+#endif
+}
+
+/* clear error status in the mrb_state structure */
+MRB_API void
+mrb_clear_error(mrb_state *mrb)
+{
+  mrb->exc = NULL;
+}
+
+/* returns TRUE if error in the previous call; internally calls mrb_clear_error() */
+MRB_API mrb_bool
+mrb_check_error(mrb_state *mrb)
+{
+  if (mrb->exc) {
+    mrb_clear_error(mrb);
+    return TRUE;
+  }
+  return FALSE;
+}
+
 void
 mrb_init_exception(mrb_state *mrb)
 {
@@ -640,14 +671,13 @@ mrb_init_exception(mrb_state *mrb)
   mrb_define_method(mrb, exception, "exception",       exc_exception,     MRB_ARGS_OPT(1));
   mrb_define_method(mrb, exception, "initialize",      exc_initialize,    MRB_ARGS_OPT(1));
   mrb_define_method(mrb, exception, "to_s",            exc_to_s,          MRB_ARGS_NONE());
-  mrb_define_method(mrb, exception, "message",         exc_message,       MRB_ARGS_NONE());
   mrb_define_method(mrb, exception, "inspect",         mrb_exc_inspect,   MRB_ARGS_NONE());
   mrb_define_method(mrb, exception, "backtrace",       mrb_exc_backtrace, MRB_ARGS_NONE());
   mrb_define_method(mrb, exception, "set_backtrace",   exc_set_backtrace, MRB_ARGS_REQ(1));
 
   mrb->eStandardError_class = mrb_define_class(mrb, "StandardError", mrb->eException_class); /* 15.2.23 */
-  mrb_define_class(mrb, "RuntimeError", mrb->eStandardError_class);          /* 15.2.28 */
-  script_error = mrb_define_class(mrb, "ScriptError", mrb->eException_class);                /* 15.2.37 */
+  mrb_define_class(mrb, "RuntimeError", E_STANDARD_ERROR);          /* 15.2.28 */
+  script_error = mrb_define_class(mrb, "ScriptError", exception);                /* 15.2.37 */
   mrb_define_class(mrb, "SyntaxError", script_error);                                        /* 15.2.38 */
   stack_error = mrb_define_class(mrb, "SystemStackError", exception);
   mrb->stack_err = mrb_obj_ptr(mrb_exc_new_lit(mrb, stack_error, "stack level too deep"));

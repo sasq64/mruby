@@ -102,7 +102,6 @@ struct RStringEmbed {
 #define RSTRING_LEN(s)       RSTR_LEN(RSTRING(s))
 #define RSTRING_CAPA(s)      RSTR_CAPA(RSTRING(s))
 #define RSTRING_END(s)       (RSTRING_PTR(s) + RSTRING_LEN(s))
-MRB_API mrb_int mrb_str_strlen(mrb_state*, struct RString*);
 #define RSTRING_CSTR(mrb,s)  mrb_string_cstr(mrb, s)
 
 #define MRB_STR_SHARED    1
@@ -114,8 +113,6 @@ MRB_API mrb_int mrb_str_strlen(mrb_state*, struct RString*);
 #define MRB_STR_EMBED_LEN_BIT 5
 #define MRB_STR_EMBED_LEN_MASK (((1 << MRB_STR_EMBED_LEN_BIT) - 1) << MRB_STR_EMBED_LEN_SHIFT)
 #define MRB_STR_TYPE_MASK 15
-
-void mrb_gc_free_str(mrb_state*, struct RString*);
 
 MRB_API void mrb_str_modify(mrb_state *mrb, struct RString *s);
 /* mrb_str_modify() with keeping ASCII flag if set */
@@ -324,21 +321,7 @@ MRB_API mrb_value mrb_str_resize(mrb_state *mrb, mrb_value str, mrb_int len);
  */
 MRB_API mrb_value mrb_str_substr(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len);
 
-/**
- * Returns a Ruby string type.
- *
- *
- * @param mrb The current mruby state.
- * @param str Ruby string.
- * @return [mrb_value] A Ruby string.
- */
-MRB_API mrb_value mrb_ensure_string_type(mrb_state *mrb, mrb_value str);
-MRB_API mrb_value mrb_check_string_type(mrb_state *mrb, mrb_value str);
-/* obsolete: use mrb_ensure_string_type() instead */
-MRB_API mrb_value mrb_string_type(mrb_state *mrb, mrb_value str);
-
-
-MRB_API mrb_value mrb_str_new_capa(mrb_state *mrb, size_t capa);
+MRB_API mrb_value mrb_str_new_capa(mrb_state *mrb, mrb_int capa);
 #define mrb_str_buf_new(mrb, capa) mrb_str_new_capa(mrb, (capa))
 
 /* NULL terminated C string from mrb_value */
@@ -346,9 +329,11 @@ MRB_API const char *mrb_string_cstr(mrb_state *mrb, mrb_value str);
 /* NULL terminated C string from mrb_value; `str` will be updated */
 MRB_API const char *mrb_string_value_cstr(mrb_state *mrb, mrb_value *str);
 /* obsolete: use RSTRING_PTR() */
-MRB_API const char *mrb_string_value_ptr(mrb_state *mrb, mrb_value str);
+#define mrb_string_value_ptr(mrb, str) RSTRING_PTR(str)
 /* obsolete: use RSTRING_LEN() */
-MRB_API mrb_int mrb_string_value_len(mrb_state *mrb, mrb_value str);
+#define mrb_string_value_len(mrb, str) RSTRING_LEN(str)
+/* obsolete: substituted by a macro; shall be removed */
+#define mrb_str_strlen(mrb, s) strlen(RSTR_PTR(s))
 
 /**
  * Duplicates a string object.
@@ -369,15 +354,10 @@ MRB_API mrb_value mrb_str_dup(mrb_state *mrb, mrb_value str);
  */
 MRB_API mrb_value mrb_str_intern(mrb_state *mrb, mrb_value self);
 
-MRB_API mrb_value mrb_str_to_inum(mrb_state *mrb, mrb_value str, mrb_int base, mrb_bool badcheck);
+MRB_API mrb_value mrb_str_to_integer(mrb_state *mrb, mrb_value str, mrb_int base, mrb_bool badcheck);
+/* obsolete: use mrb_str_to_integer() */
+#define mrb_str_to_inum(mrb, str, base, badcheck) mrb_str_to_integer(mrb, str, base, badcheck)
 MRB_API double mrb_str_to_dbl(mrb_state *mrb, mrb_value str, mrb_bool badcheck);
-
-/**
- * Returns a converted string type.
- * For type checking, non converting `mrb_to_str` is recommended.
- * obsolete: use `mrb_obj_as_string()` instead.
- */
-#define mrb_str_to_str(mrb, str) mrb_obj_as_string(mrb, str)
 
 /**
  * Returns true if the strings match and false if the strings don't match.
@@ -441,26 +421,10 @@ MRB_API int mrb_str_cmp(mrb_state *mrb, mrb_value str1, mrb_value str2);
  */
 MRB_API char *mrb_str_to_cstr(mrb_state *mrb, mrb_value str);
 
-uint32_t mrb_str_hash(mrb_state *mrb, mrb_value str);
-mrb_value mrb_str_dump(mrb_state *mrb, mrb_value str);
-
-/**
- * Returns a printable version of str, surrounded by quote marks, with special characters escaped.
- */
-mrb_value mrb_str_inspect(mrb_state *mrb, mrb_value str);
-
 /* For backward compatibility */
 #define mrb_str_cat2(mrb, str, ptr) mrb_str_cat_cstr(mrb, str, ptr)
 #define mrb_str_buf_cat(mrb, str, ptr, len) mrb_str_cat(mrb, str, ptr, len)
 #define mrb_str_buf_append(mrb, str, str2) mrb_str_cat_str(mrb, str, str2)
-
-mrb_bool mrb_str_beg_len(mrb_int str_len, mrb_int *begp, mrb_int *lenp);
-mrb_value mrb_str_byte_subseq(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len);
-
-#ifdef MRB_UTF8_STRING
-mrb_int mrb_utf8len(const char *str, const char *end);
-mrb_int mrb_utf8_strlen(const char *str, mrb_int byte_len);
-#endif
 
 MRB_END_DECL
 

@@ -27,45 +27,19 @@ class String
     end
     start = 0
     string = dup
-    self_len = length
-    sep_len = separator.length
+    self_len = self.bytesize
+    sep_len = separator.bytesize
 
-    while (pointer = string.index(separator, start))
+    while (pointer = string.byteindex(separator, start))
       pointer += sep_len
-      pointer += 1 while paragraph_mode && string[pointer] == "\n"
-      block.call(string[start, pointer - start])
+      pointer += 1 while paragraph_mode && string.getbyte(pointer) == 10 # 10 == \n
+      block.call(string.byteslice(start, pointer - start))
       start = pointer
     end
     return self if start == self_len
 
-    block.call(string[start, self_len - start])
+    block.call(string.byteslice(start, self_len - start))
     self
-  end
-
-  # private method for gsub/sub
-  def __sub_replace(pre, m, post)
-    s = ""
-    i = 0
-    while j = index("\\", i)
-      break if j == length-1
-      t = case self[j+1]
-          when "\\"
-            "\\"
-          when "`"
-            pre
-          when "&", "0"
-            m
-          when "'"
-            post
-          when "1", "2", "3", "4", "5", "6", "7", "8", "9"
-            ""
-          else
-            self[j, 2]
-          end
-      s += self[i, j-i] + t
-      i = j + 2
-    end
-    s + self[i, length-i]
   end
 
   ##
@@ -77,32 +51,29 @@ class String
   # ISO 15.2.10.5.18
   def gsub(*args, &block)
     return to_enum(:gsub, *args) if args.length == 1 && !block
-    raise ArgumentError, "wrong number of arguments" unless (1..2).include?(args.length)
+    raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 1..2)" unless (1..2).include?(args.length)
 
     pattern, replace = *args
     plen = pattern.length
     if args.length == 2 && block
       block = nil
     end
-    if !replace.nil? || !block
-      replace.__to_str
-    end
     offset = 0
     result = []
-    while found = index(pattern, offset)
-      result << self[offset, found - offset]
+    while found = self.byteindex(pattern, offset)
+      result << self.byteslice(offset, found - offset)
       offset = found + plen
       result << if block
         block.call(pattern).to_s
       else
-        replace.__sub_replace(self[0, found], pattern, self[offset..-1] || "")
+        self.__sub_replace(replace, pattern, found)
       end
       if plen == 0
-        result << self[offset, 1]
+        result << self.byteslice(offset, 1)
         offset += 1
       end
     end
-    result << self[offset..-1] if offset < length
+    result << self.byteslice(offset..-1) if offset < length
     result.join
   end
 
@@ -144,25 +115,20 @@ class String
     end
 
     pattern, replace = *args
-    pattern.__to_str
     if args.length == 2 && block
       block = nil
     end
-    unless block
-      replace.__to_str
-    end
     result = []
-    this = dup
-    found = index(pattern)
-    return this unless found
-    result << this[0, found]
+    found = self.index(pattern)
+    return self.dup unless found
+    result << self.byteslice(0, found)
     offset = found + pattern.length
     result << if block
       block.call(pattern).to_s
     else
-      replace.__sub_replace(this[0, found], pattern, this[offset..-1] || "")
+      self.__sub_replace(replace, pattern, found)
     end
-    result << this[offset..-1] if offset < length
+    result << self.byteslice(offset..-1) if offset < length
     result.join
   end
 
@@ -184,10 +150,9 @@ class String
   # Call the given block for each byte of +self+.
   def each_byte(&block)
     return to_enum(:each_byte, &block) unless block
-    bytes = self.bytes
     pos = 0
-    while pos < bytes.size
-      block.call(bytes[pos])
+    while pos < bytesize
+      block.call(getbyte(pos))
       pos += 1
     end
     self

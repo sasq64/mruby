@@ -73,8 +73,6 @@ MRuby::CrossBuild.new("dreamcast") do |conf|
   # Some Gems are incompatible and were disabled.
 
   conf.gem :core => "mruby-array-ext"
-  conf.gem :core => "mruby-binding"
-  conf.gem :core => "mruby-binding-core"
   conf.gem :core => "mruby-catch"
   conf.gem :core => "mruby-class-ext"
   conf.gem :core => "mruby-cmath"
@@ -90,7 +88,6 @@ MRuby::CrossBuild.new("dreamcast") do |conf|
   conf.gem :core => "mruby-exit"
   conf.gem :core => "mruby-fiber"
   conf.gem :core => "mruby-hash-ext"
-  conf.gem :core => "mruby-inline-struct"
 #  conf.gem :core => "mruby-io"
   conf.gem :core => "mruby-kernel-ext"
   conf.gem :core => "mruby-math"

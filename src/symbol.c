@@ -10,6 +10,7 @@
 #include <mruby/string.h>
 #include <mruby/dump.h>
 #include <mruby/class.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 #ifndef MRB_NO_PRESYM
@@ -53,13 +54,6 @@ presym_sym2name(mrb_sym sym, mrb_int *lenp)
 #endif  /* MRB_NO_PRESYM */
 
 /* ------------------------------------------------------ */
-typedef struct symbol_name {
-  mrb_bool lit : 1;
-  uint8_t prev;
-  uint16_t len;
-  const char *name;
-} symbol_name;
-
 static void
 sym_validate_len(mrb_state *mrb, size_t len)
 {
@@ -80,16 +74,19 @@ static const char pack_table[] = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRS
 static mrb_sym
 sym_inline_pack(const char *name, size_t len)
 {
+#if defined(MRB_WORD_BOXING) && defined(MRB_32BIT) && !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE)
+  const size_t pack_length_max = 4;
+#else
   const size_t pack_length_max = 5;
+#endif
 
   char c;
   const char *p;
-  size_t i;
   mrb_sym sym = 0;
 
   if (len > pack_length_max) return 0; /* too long */
   if (len == 0) return 0; /* empty string */
-  for (i=0; i<len; i++) {
+  for (size_t i=0; i<len; i++) {
     uint32_t bits;
 
     c = name[i];
@@ -113,7 +110,7 @@ sym_inline_unpack(mrb_sym sym, char *buf, mrb_int *lenp)
   for (i=0; i<5; i++) {
     uint32_t bits = sym>>(24-i*6) & 0x3f;
     if (bits == 0) break;
-    buf[i] = pack_table[bits-1];;
+    buf[i] = pack_table[bits-1];
   }
   buf[i] = '\0';
   if (lenp) *lenp = i;
@@ -121,27 +118,33 @@ sym_inline_unpack(mrb_sym sym, char *buf, mrb_int *lenp)
 }
 #endif
 
-static uint8_t
-symhash(const char *key, size_t len)
-{
-    uint32_t hash, i;
+#define sym_lit_p(mrb, i) (mrb->symflags[i>>3]&(1<<(i&7)))
+#define sym_lit_set(mrb, i) mrb->symflags[i>>3]|=(1<<(i&7))
+#define sym_flags_clear(mrb, i) mrb->symflags[i>>3]&=~(1<<(i&7))
 
-    for(hash = i = 0; i < len; ++i) {
-        hash += key[i];
-        hash += (hash << 10);
-        hash ^= (hash >> 6);
-    }
-    hash += (hash << 3);
-    hash ^= (hash >> 11);
-    hash += (hash << 15);
-    return hash & 0xff;
+static mrb_bool
+sym_check(mrb_state *mrb, const char *name, size_t len, mrb_sym i)
+{
+  const char *symname = mrb->symtbl[i];
+  size_t symlen;
+
+  if (sym_lit_p(mrb, i)) {
+    symlen = strlen(symname);
+  }
+  else {
+    /* length in BER */
+    symlen = mrb_packed_int_decode((const uint8_t*)symname, (const uint8_t**)&symname);
+  }
+  if (len == symlen && memcmp(symname, name, len) == 0) {
+    return TRUE;
+  }
+  return FALSE;
 }
 
 static mrb_sym
 find_symbol(mrb_state *mrb, const char *name, size_t len, uint8_t *hashp)
 {
   mrb_sym i;
-  symbol_name *sname;
   uint8_t hash;
 
 #ifndef MRB_NO_PRESYM
@@ -154,29 +157,29 @@ find_symbol(mrb_state *mrb, const char *name, size_t len, uint8_t *hashp)
   i = sym_inline_pack(name, len);
   if (i > 0) return i;
 
-  hash = symhash(name, len);
+  hash = mrb_byte_hash((const uint8_t*)name, len);
   if (hashp) *hashp = hash;
 
   i = mrb->symhash[hash];
   if (i == 0) return 0;
-  do {
-    sname = &mrb->symtbl[i];
-    if (sname->len == len && memcmp(sname->name, name, len) == 0) {
+  for (;;) {
+    if (sym_check(mrb, name, len, i)) {
       return (i+MRB_PRESYM_MAX);
     }
-    if (sname->prev == 0xff) {
+    uint8_t diff = mrb->symlink[i];
+    if (diff == 0xff) {
       i -= 0xff;
-      sname = &mrb->symtbl[i];
-      while (mrb->symtbl < sname) {
-        if (sname->len == len && memcmp(sname->name, name, len) == 0) {
-          return (mrb_sym)((sname - mrb->symtbl)+MRB_PRESYM_MAX);
+      while (i > 0) {
+        if (sym_check(mrb, name, len, i)) {
+          return (i+MRB_PRESYM_MAX);
         }
-        sname--;
+        i--;
       }
       return 0;
     }
-    i -= sname->prev;
-  } while (sname->prev > 0);
+    if (diff == 0) return 0;
+    i -= diff;
+  }
   return 0;
 }
 
@@ -184,7 +187,6 @@ static mrb_sym
 sym_intern(mrb_state *mrb, const char *name, size_t len, mrb_bool lit)
 {
   mrb_sym sym;
-  symbol_name *sname;
   uint8_t hash;
 
   sym_validate_len(mrb, len);
@@ -193,35 +195,39 @@ sym_intern(mrb_state *mrb, const char *name, size_t len, mrb_bool lit)
 
   /* registering a new symbol */
   sym = mrb->symidx + 1;
-  if (mrb->symcapa < sym) {
+  if (mrb->symcapa <= sym) {
     size_t symcapa = mrb->symcapa;
     if (symcapa == 0) symcapa = 100;
     else symcapa = (size_t)(symcapa * 6 / 5);
-    mrb->symtbl = (symbol_name*)mrb_realloc(mrb, mrb->symtbl, sizeof(symbol_name)*(symcapa+1));
+    mrb->symtbl = (const char**)mrb_realloc(mrb, (void*)mrb->symtbl, sizeof(char*)*symcapa);
+    mrb->symflags = (uint8_t*)mrb_realloc(mrb, mrb->symflags, symcapa/8+1);
+    memset(mrb->symflags+mrb->symcapa/8+1, 0, (symcapa-mrb->symcapa)/8);
+    mrb->symlink = (uint8_t*)mrb_realloc(mrb, mrb->symlink, symcapa);
     mrb->symcapa = symcapa;
   }
-  sname = &mrb->symtbl[sym];
-  sname->len = (uint16_t)len;
-  if (lit || mrb_ro_data_p(name)) {
-    sname->name = name;
-    sname->lit = TRUE;
+  sym_flags_clear(mrb, sym);
+  if ((lit || mrb_ro_data_p(name)) && name[len] == 0 && strlen(name) == len) {
+    sym_lit_set(mrb, sym);
+    mrb->symtbl[sym] = name;
   }
   else {
-    char *p = (char *)mrb_malloc(mrb, len+1);
-    memcpy(p, name, len);
-    p[len] = 0;
-    sname->name = (const char*)p;
-    sname->lit = FALSE;
+    uint32_t ulen = (uint32_t)len;
+    size_t ilen = mrb_packed_int_len(ulen);
+    char *p = (char*)mrb_malloc(mrb, len+ilen+1);
+    mrb_packed_int_encode(ulen, (uint8_t*)p);
+    memcpy(p+ilen, name, len);
+    p[ilen+len] = 0;
+    mrb->symtbl[sym] = p;
   }
   if (mrb->symhash[hash]) {
     mrb_sym i = sym - mrb->symhash[hash];
     if (i > 0xff)
-      sname->prev = 0xff;
+      mrb->symlink[sym] = 0xff;
     else
-      sname->prev = i;
+      mrb->symlink[sym] = i;
   }
   else {
-    sname->prev = 0;
+    mrb->symlink[sym] = 0;
   }
   mrb->symhash[hash] = mrb->symidx = sym;
 
@@ -319,8 +325,15 @@ sym2name_len(mrb_state *mrb, mrb_sym sym, char *buf, mrb_int *lenp)
     return NULL;
   }
 
-  if (lenp) *lenp = mrb->symtbl[sym].len;
-  return mrb->symtbl[sym].name;
+  const char *symname = mrb->symtbl[sym];
+  if (!sym_lit_p(mrb, sym)) {
+    uint32_t len = mrb_packed_int_decode((const uint8_t*)symname, (const uint8_t**)&symname);
+    if (lenp) *lenp = (mrb_int)len;
+  }
+  else if (lenp) {
+    *lenp = (mrb_int)strlen(symname);
+  }
+  return symname;
 }
 
 MRB_API const char*
@@ -338,12 +351,14 @@ mrb_free_symtbl(mrb_state *mrb)
 {
   mrb_sym i, lim;
 
-  for (i=1, lim=mrb->symidx+1; i<lim; i++) {
-    if (!mrb->symtbl[i].lit) {
-      mrb_free(mrb, (char*)mrb->symtbl[i].name);
+  for (i=1,lim=mrb->symidx+1; i<lim; i++) {
+    if (!sym_lit_p(mrb, i)) {
+      mrb_free(mrb, (char*)mrb->symtbl[i]);
     }
   }
-  mrb_free(mrb, mrb->symtbl);
+  mrb_free(mrb, (void*)mrb->symtbl);
+  mrb_free(mrb, (void*)mrb->symlink);
+  mrb_free(mrb, (void*)mrb->symflags);
 }
 
 void

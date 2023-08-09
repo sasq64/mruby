@@ -141,7 +141,8 @@ static listcmd_parser_state*
 listcmd_parser_state_new(mrb_state *mrb)
 {
   listcmd_parser_state *st = (listcmd_parser_state*)mrb_malloc(mrb, sizeof(listcmd_parser_state));
-  memset(st, 0, sizeof(listcmd_parser_state));
+  static const listcmd_parser_state st_zero = {0};
+  *st = st_zero;
   return st;
 }
 
@@ -166,7 +167,8 @@ parse_uint(char **sp, uint16_t *n)
     return FALSE;
   }
 
-  for (p = *sp; *p != '\0' && ISDIGIT(*p); p++) ;
+  for (p = *sp; *p != '\0' && ISDIGIT(*p); p++)
+    ;
 
   if (p != *sp && (i = atoi(*sp)) >= 0) {
     *n = (uint16_t)i;
@@ -349,9 +351,9 @@ check_cmd_pattern(const char *pattern, const char *cmd)
   }
 
   p = lbracket + 1;
-  q = (char *)cmd + (lbracket - pattern);
+  q = (char*)cmd + (lbracket - pattern);
 
-  for ( ; p < rbracket && *q != '\0'; p++, q++) {
+  for (; p < rbracket && *q != '\0'; p++, q++) {
     if (*p != *q) {
       break;
     }
@@ -478,7 +480,8 @@ dbgcmd_quit(mrb_state *mrb, mrdb_state *mrdb)
         break;
       }
       c = buf;
-      while (buf != '\n' && (buf = getchar()) != EOF) ;
+      while (buf != '\n' && (buf = getchar()) != EOF)
+        ;
 
       if (c == 'y' || c == 'Y') {
         mrdb->dbg->xm = DBG_QUIT;
@@ -499,7 +502,7 @@ dbgcmd_quit(mrb_state *mrb, mrdb_state *mrdb)
 
   if (mrdb->dbg->xm == DBG_QUIT) {
     struct RClass *exc;
-    exc = mrb_define_class(mrb, "DebuggerExit", mrb->eException_class);
+    exc = mrb_define_class(mrb, "DebuggerExit", E_EXCEPTION);
     mrb_raise(mrb, exc, "Exit mrdb");
   }
   return DBGST_PROMPT;

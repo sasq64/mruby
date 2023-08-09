@@ -9,17 +9,24 @@
 #include <mruby/numeric.h>
 #include <mruby/string.h>
 #include <mruby/class.h>
+#include <mruby/internal.h>
 #include <mruby/presym.h>
 
 MRB_API mrb_bool
 mrb_obj_eq(mrb_state *mrb, mrb_value v1, mrb_value v2)
 {
+#if defined(MRB_NAN_BOXING)
+  return v1.u == v2.u;
+#elif defined(MRB_WORD_BOXING)
+  return v1.w == v2.w;
+#else  /* MRB_NO_BOXING */
   if (mrb_type(v1) != mrb_type(v2)) return FALSE;
   switch (mrb_type(v1)) {
   case MRB_TT_TRUE:
     return TRUE;
 
   case MRB_TT_FALSE:
+    return (mrb_fixnum(v1) == mrb_fixnum(v2));
   case MRB_TT_INTEGER:
     return (mrb_integer(v1) == mrb_integer(v2));
   case MRB_TT_SYMBOL:
@@ -33,6 +40,7 @@ mrb_obj_eq(mrb_state *mrb, mrb_value v1, mrb_value v2)
   default:
     return (mrb_ptr(v1) == mrb_ptr(v2));
   }
+#endif
 }
 
 MRB_API mrb_bool
@@ -45,22 +53,29 @@ mrb_obj_equal(mrb_state *mrb, mrb_value v1, mrb_value v2)
 MRB_API mrb_bool
 mrb_equal(mrb_state *mrb, mrb_value obj1, mrb_value obj2)
 {
-  mrb_value result;
-
   if (mrb_obj_eq(mrb, obj1, obj2)) return TRUE;
 #ifndef MRB_NO_FLOAT
   /* value mixing with integer and float */
-  if (mrb_integer_p(obj1)) {
-    if (mrb_float_p(obj2) && (mrb_float)mrb_integer(obj1) == mrb_float(obj2))
+  else if (mrb_integer_p(obj1) && mrb_float_p(obj2)) {
+    if ((mrb_float)mrb_integer(obj1) == mrb_float(obj2))
       return TRUE;
   }
-  else if (mrb_float_p(obj1)) {
-    if (mrb_integer_p(obj2) && mrb_float(obj1) == (mrb_float)mrb_integer(obj2))
+  else if (mrb_float_p(obj1) && mrb_integer_p(obj2)) {
+    if (mrb_float(obj1) == (mrb_float)mrb_integer(obj2))
       return TRUE;
   }
 #endif
-  result = mrb_funcall_id(mrb, obj1, MRB_OPSYM(eq), 1, obj2);
-  if (mrb_test(result)) return TRUE;
+#ifdef MRB_USE_BIGINT
+  else if (mrb_bigint_p(obj1) &&
+      (mrb_integer_p(obj2) || mrb_bigint_p(obj2) || mrb_float_p(obj2))) {
+    if (mrb_bint_cmp(mrb, obj1, obj2) == 0)
+      return TRUE;
+  }
+#endif
+  else if (!mrb_func_basic_p(mrb, obj1, MRB_OPSYM(eq), mrb_obj_equal_m)) {
+    mrb_value result = mrb_funcall_argv(mrb, obj1, MRB_OPSYM(eq), 1, &obj2);
+    if (mrb_test(result)) return TRUE;
+  }
   return FALSE;
 }
 
@@ -361,7 +376,7 @@ mrb_type_convert_check(mrb_state *mrb, mrb_value val, enum mrb_vtype type, mrb_s
 {
   mrb_value v;
 
-  if (mrb_type(val) == type && type != MRB_TT_DATA && type != MRB_TT_ISTRUCT) return val;
+  if (mrb_type(val) == type && type != MRB_TT_CDATA && type != MRB_TT_ISTRUCT) return val;
   v = convert_type(mrb, val, type_name(type), method, FALSE);
   if (mrb_nil_p(v) || mrb_type(v) != type) return mrb_nil_value();
   return v;
@@ -477,67 +492,64 @@ mrb_obj_is_kind_of(mrb_state *mrb, mrb_value obj, struct RClass *c)
   return FALSE;
 }
 
-MRB_API mrb_value
-mrb_to_int(mrb_state *mrb, mrb_value val)
-{
+#ifdef MRB_USE_RATIONAL
+// provided by mruby-rational with MRB_USE_RATIONAL
+mrb_value mrb_rational_to_i(mrb_state *mrb, mrb_value rat);
+mrb_value mrb_rational_to_f(mrb_state *mrb, mrb_value rat);
+#endif
+#ifdef MRB_USE_COMPLEX
+// provided by mruby-complex with MRB_USE_COMPLEX
+mrb_value mrb_complex_to_f(mrb_state *mrb, mrb_value comp);
+mrb_value mrb_complex_to_i(mrb_state *mrb, mrb_value comp);
+#endif
 
+MRB_API mrb_value
+mrb_ensure_integer_type(mrb_state *mrb, mrb_value val)
+{
   if (!mrb_integer_p(val)) {
 #ifndef MRB_NO_FLOAT
     if (mrb_float_p(val)) {
       return mrb_float_to_integer(mrb, val);
     }
+    else {
+      switch (mrb_type(val)) {
+#ifdef MRB_USE_BIGINT
+      case MRB_TT_BIGINT:
+        return val;
 #endif
-    if (mrb_string_p(val)) {
-      mrb_raise(mrb, E_TYPE_ERROR, "can't convert String to Integer");
+#ifdef MRB_USE_RATIONAL
+      case MRB_TT_RATIONAL:
+        return mrb_rational_to_i(mrb, val);
+#endif
+#ifdef MRB_USE_COMPLEX
+      case MRB_TT_COMPLEX:
+        return mrb_complex_to_i(mrb, val);
+#endif
+      default:
+        break;
+      }
     }
-    return mrb_type_convert(mrb, val, MRB_TT_INTEGER, MRB_SYM(to_i));
+#endif
+    mrb_raisef(mrb, E_TYPE_ERROR, "%Y cannot be converted to Integer", val);
   }
   return val;
 }
 
 MRB_API mrb_value
-mrb_convert_to_integer(mrb_state *mrb, mrb_value val, mrb_int base)
+mrb_ensure_int_type(mrb_state *mrb, mrb_value val)
 {
-  mrb_value tmp;
-
-  if (mrb_nil_p(val)) {
-    if (base != 0) goto arg_error;
-    mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Integer");
+  val = mrb_ensure_integer_type(mrb, val);
+#ifdef MRB_USE_BIGINT
+  if (mrb_bigint_p(val)) {
+    return mrb_int_value(mrb, mrb_bint_as_int(mrb, val));
   }
-  switch (mrb_type(val)) {
-#ifndef MRB_NO_FLOAT
-    case MRB_TT_FLOAT:
-      if (base != 0) goto arg_error;
-      return mrb_float_to_integer(mrb, val);
 #endif
-
-    case MRB_TT_INTEGER:
-      if (base != 0) goto arg_error;
-      return val;
-
-    case MRB_TT_STRING:
-    string_conv:
-      return mrb_str_to_inum(mrb, val, base, TRUE);
-
-    default:
-      break;
-  }
-  if (base != 0) {
-    tmp = mrb_check_string_type(mrb, val);
-    if (!mrb_nil_p(tmp)) {
-      val = tmp;
-      goto string_conv;
-    }
-arg_error:
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "base specified for non string value");
-  }
-  /* to raise TypeError */
-  return mrb_to_int(mrb, val);
+  return val;
 }
 
 #ifndef MRB_NO_FLOAT
 MRB_API mrb_value
-mrb_to_float(mrb_state *mrb, mrb_value val)
+mrb_ensure_float_type(mrb_state *mrb, mrb_value val)
 {
   if (mrb_nil_p(val)) {
     mrb_raise(mrb, E_TYPE_ERROR, "can't convert nil into Float");
@@ -549,27 +561,28 @@ mrb_to_float(mrb_state *mrb, mrb_value val)
     case MRB_TT_FLOAT:
       return val;
 
-    case MRB_TT_STRING:
-      return mrb_float_value(mrb, mrb_str_to_dbl(mrb, val, TRUE));
+#ifdef MRB_USE_RATIONAL
+    case MRB_TT_RATIONAL:
+      return mrb_rational_to_f(mrb, val);
+#endif
+
+#ifdef MRB_USE_COMPLEX
+    case MRB_TT_COMPLEX:
+      return mrb_complex_to_f(mrb, val);
+#endif
+
+#ifdef MRB_USE_BIGINT
+    case MRB_TT_BIGINT:
+      return mrb_float_value(mrb, mrb_bint_as_float(mrb, val));
+#endif
 
     default:
-      return mrb_type_convert(mrb, val, MRB_TT_FLOAT, MRB_SYM(to_f));
+      mrb_raisef(mrb, E_TYPE_ERROR, "%Y cannot be converted to Float", val);
+      /* not reached */
+      return val;
   }
 }
 #endif
-
-MRB_API mrb_value
-mrb_to_str(mrb_state *mrb, mrb_value val)
-{
-  return mrb_ensure_string_type(mrb, val);
-}
-
-/* obsolete: use mrb_ensure_string_type() instead */
-MRB_API mrb_value
-mrb_string_type(mrb_state *mrb, mrb_value str)
-{
-  return mrb_ensure_string_type(mrb, str);
-}
 
 MRB_API mrb_value
 mrb_ensure_string_type(mrb_state *mrb, mrb_value str)
@@ -622,12 +635,16 @@ mrb_check_hash_type(mrb_state *mrb, mrb_value hash)
 MRB_API mrb_value
 mrb_inspect(mrb_state *mrb, mrb_value obj)
 {
-  return mrb_obj_as_string(mrb, mrb_funcall_id(mrb, obj, MRB_SYM(inspect), 0));
+  mrb_value v = mrb_funcall_argv(mrb, obj, MRB_SYM(inspect), 0, NULL);
+  if (!mrb_string_p(v)) {
+    v = mrb_obj_as_string(mrb, obj);
+  }
+  return v;
 }
 
 MRB_API mrb_bool
 mrb_eql(mrb_state *mrb, mrb_value obj1, mrb_value obj2)
 {
   if (mrb_obj_eq(mrb, obj1, obj2)) return TRUE;
-  return mrb_test(mrb_funcall_id(mrb, obj1, MRB_SYM_Q(eql), 1, obj2));
+  return mrb_test(mrb_funcall_argv(mrb, obj1, MRB_SYM_Q(eql), 1, &obj2));
 }
